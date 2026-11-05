@@ -1,0 +1,59 @@
+# Tempo Télé - compilation depuis Windows via Codemagic.
+# 1. Lancer « diagnostic-ios » pour vérifier gratuitement le code.
+# 2. Pour TestFlight, remplacer com.example.tempotele dans CE fichier ET
+#    dans TempoTele.xcodeproj/project.pbxproj par votre identifiant Apple unique.
+# 3. Créer une intégration App Store Connect appelée tempotele_key dans Codemagic.
+# 4. Créer une fiche d’app correspondante dans App Store Connect.
+workflows:
+  diagnostic-ios:
+    name: "1 - Vérifier la compilation (sans compte payant)"
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: "Compiler l’app pour simulateur"
+        script: |
+          set -e
+          xcodebuild -project TempoTele.xcodeproj \
+            -scheme TempoTele \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
+    artifacts:
+      - /tmp/xcodebuild_logs/*.log
+
+  testflight-ios:
+    name: "2 - Installer sur iPhone via TestFlight"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: tempotele_key
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.tempotele
+      xcode: latest
+    scripts:
+      - name: "Mettre un nouveau numéro de build"
+        script: |
+          set -e
+          number=$((1000 + PROJECT_BUILD_NUMBER))
+          sed -i '' -E "s/CURRENT_PROJECT_VERSION = [0-9]+;/CURRENT_PROJECT_VERSION = ${number};/g" TempoTele.xcodeproj/project.pbxproj
+      - name: "Préparer la signature Apple"
+        script: |
+          xcode-project use-profiles --custom-export-options='{"testFlightInternalTestingOnly": true}'
+      - name: "Créer l’application iOS signée"
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/TempoTele.xcodeproj" \
+            --scheme TempoTele
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
